@@ -2,43 +2,30 @@
    🐾 Hapo Pug Chatbot - Complete JavaScript
    ============================================ */
 
-/**
- * کلاس اصلی مدیریت چت‌بات هاپو
- * شامل تمام منطق برنامه از جمله ارسال/دریافت پیام، 
- * مدیریت تاریخچه، تنظیمات و UI
- */
 class HapoChat {
     constructor() {
-        // ─── تنظیمات پیش‌فرض ───
         this.config = {
-            maxHistory: 100,           // حداکثر تعداد پیام‌های ذخیره شده
-            maxChars: 2000,            // حداکثر کاراکتر پیام
-            workerUrl: '',             // آدرس Cloudflare Worker
-            apiTimeout: 30000,         // زمان انتظار پاسخ API (میلی‌ثانیه)
-            retryAttempts: 2,          // تعداد تلاش مجدد
-            retryDelay: 2000,          // تأخیر بین تلاش‌ها
+            maxHistory: 100,
+            maxChars: 2000,
+            workerUrl: 'https://hapo-api-proxy.arsaepaengin.workers.dev',
+            apiTimeout: 30000,
+            retryAttempts: 2,
+            retryDelay: 2000,
         };
 
-        // ─── وضعیت برنامه ───
         this.state = {
-            messages: [],              // آرایه پیام‌ها
-            isTyping: false,           // وضعیت تایپ ربات
-            isOnline: true,            // وضعیت اتصال اینترنت
-            theme: 'light',            // تم فعلی
-            soundEnabled: true,        // صدای اعلان فعال
-            isFirstVisit: true,        // اولین بازدید
+            messages: [],
+            isTyping: false,
+            isOnline: true,
+            theme: 'light',
+            soundEnabled: true,
+            isFirstVisit: true,
         };
 
-        // ─── المان‌های DOM ───
         this.elements = {};
-
-        // ─── راه‌اندازی ───
         this.init();
     }
 
-    /* ==========================================
-       🚀 راه‌اندازی اولیه
-       ========================================== */
     init() {
         this.cacheElements();
         this.loadSettings();
@@ -48,7 +35,6 @@ class HapoChat {
         this.applyTheme();
         this.updateCharCount();
 
-        // نمایش پیام خوش‌آمدگویی در اولین بازدید
         if (this.state.isFirstVisit || this.state.messages.length === 0) {
             this.showWelcome();
             this.state.isFirstVisit = false;
@@ -57,15 +43,10 @@ class HapoChat {
             this.renderMessages();
         }
 
-        // بررسی دوره‌ای وضعیت اتصال
         setInterval(() => this.checkConnection(), 10000);
-
         console.log('🐾 هاپو آماده است!');
     }
 
-    /**
-     * کش کردن المان‌های DOM برای دسترسی سریع‌تر
-     */
     cacheElements() {
         this.elements = {
             app: document.getElementById('app'),
@@ -94,15 +75,11 @@ class HapoChat {
         };
     }
 
-    /* ==========================================
-       🎧 مدیریت رویدادها
-       ========================================== */
     bindEvents() {
         const { messageInput, sendBtn, themeToggle, clearBtn, exportBtn, 
                 settingsBtn, modalClose, modalOverlay, darkModeToggle, 
                 soundToggle, clearHistoryBtn, voiceBtn, attachBtn } = this.elements;
 
-        // ارسال پیام
         sendBtn.addEventListener('click', () => this.sendMessage());
         messageInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -111,52 +88,42 @@ class HapoChat {
             }
         });
 
-        // تغییر سایز خودکار textarea
         messageInput.addEventListener('input', () => {
             this.autoResizeInput();
             this.updateCharCount();
         });
 
-        // تغییر تم
         themeToggle.addEventListener('click', () => this.toggleTheme());
-
-        // پاک کردن چت
         clearBtn.addEventListener('click', () => this.clearChat());
-
-        // ذخیره چت
         exportBtn.addEventListener('click', () => this.exportChat());
 
-        // تنظیمات
         settingsBtn.addEventListener('click', () => this.openSettings());
         modalClose.addEventListener('click', () => this.closeSettings());
         modalOverlay.addEventListener('click', () => this.closeSettings());
 
-        // تنظیمات داخلی
         darkModeToggle.addEventListener('change', (e) => this.setTheme(e.target.checked ? 'dark' : 'light'));
         soundToggle.addEventListener('change', (e) => {
             this.state.soundEnabled = e.target.checked;
             this.saveSettings();
         });
-        workerUrlInput.addEventListener('change', (e) => {
+
+        // FIX: Save worker URL immediately on every keystroke
+        this.elements.workerUrlInput.addEventListener('input', (e) => {
             this.config.workerUrl = e.target.value.trim();
             this.saveSettings();
         });
+
         clearHistoryBtn.addEventListener('click', () => {
             this.clearHistory();
             this.closeSettings();
         });
 
-        // ضبط صدا
         voiceBtn.addEventListener('click', () => this.toggleVoiceInput());
-
-        // پیوست فایل
         attachBtn.addEventListener('click', () => this.handleAttach());
 
-        // رویدادهای اتصال اینترنت
         window.addEventListener('online', () => this.updateConnectionStatus(true));
         window.addEventListener('offline', () => this.updateConnectionStatus(false));
 
-        // بستن مدال با Escape
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') this.closeSettings();
         });
@@ -166,14 +133,10 @@ class HapoChat {
        💬 مدیریت پیام‌ها
        ========================================== */
 
-    /**
-     * ارسال پیام کاربر و دریافت پاسخ از API
-     */
     async sendMessage() {
         const { messageInput, sendBtn } = this.elements;
         const text = messageInput.value.trim();
 
-        // اعتبارسنجی
         if (!text || this.state.isTyping) return;
         if (text.length > this.config.maxChars) {
             this.showToast('پیام خیلی طولانی است! 🐶', 'warning');
@@ -183,19 +146,35 @@ class HapoChat {
             this.showToast('اینترنت قطع شده! بعداً امتحان کن 🐾', 'warning');
             return;
         }
+
+        // FIX: If no worker URL, show prompt immediately and continue
         if (!this.config.workerUrl) {
-            this.showToast('لطفاً آدرس Worker را در تنظیمات وارد کن ⚙️', 'warning');
-            this.openSettings();
-            return;
+            const url = prompt(
+                '🔧 آدرس Cloudflare Worker تنظیم نشده!\n\n' +
+                'لطفاً آدرس Worker خود را وارد کنید:\n' +
+                '(مثال: https://hapo-api-proxy.arsaepaengin.workers.dev)\n\n' +
+                'این آدرس را می‌توانید از داشبورد Cloudflare > Workers > Your Worker بگیرید.'
+            );
+            if (url && url.trim()) {
+                this.config.workerUrl = url.trim();
+                this.saveSettings();
+                if (this.elements.workerUrlInput) {
+                    this.elements.workerUrlInput.value = url.trim();
+                }
+                this.showToast('آدرس Worker ذخیره شد! در حال ارسال... 🎉', 'success');
+                // Continue below to send the message
+            } else {
+                this.showToast('بدون آدرس Worker نمی‌تونم پیامتو بفرستم 🐶', 'warning');
+                return;
+            }
         }
 
-        // اضافه کردن پیام کاربر
+        // Add user message
         this.addMessage('user', text);
         messageInput.value = '';
         this.autoResizeInput();
         this.updateCharCount();
 
-        // نمایش وضعیت تایپ
         this.setTyping(true);
         sendBtn.disabled = true;
 
@@ -217,11 +196,6 @@ class HapoChat {
         }
     }
 
-    /**
-     * اضافه کردن پیام به چت
-     * @param {string} sender - 'user' یا 'bot'
-     * @param {string} text - متن پیام
-     */
     addMessage(sender, text) {
         const message = {
             id: Date.now() + Math.random(),
@@ -232,7 +206,6 @@ class HapoChat {
 
         this.state.messages.push(message);
 
-        // محدود کردن تاریخچه
         if (this.state.messages.length > this.config.maxHistory) {
             this.state.messages = this.state.messages.slice(-this.config.maxHistory);
         }
@@ -247,10 +220,6 @@ class HapoChat {
         }
     }
 
-    /**
-     * رندر کردن یک پیام در DOM
-     * @param {Object} message - آبجکت پیام
-     */
     renderMessage(message) {
         const { chatMessages } = this.elements;
         const isBot = message.sender === 'bot';
@@ -262,7 +231,6 @@ class HapoChat {
         messageEl.className = `message ${message.sender}`;
         messageEl.dataset.id = message.id;
 
-        // تبدیل متن ساده به HTML (با پشتیبانی از خط جدید)
         const formattedText = this.formatMessageText(message.text);
 
         messageEl.innerHTML = `
@@ -276,9 +244,6 @@ class HapoChat {
         chatMessages.appendChild(messageEl);
     }
 
-    /**
-     * رندر کردن تمام پیام‌ها (برای بارگذاری اولیه)
-     */
     renderMessages() {
         const { chatMessages } = this.elements;
         chatMessages.innerHTML = '';
@@ -287,31 +252,14 @@ class HapoChat {
         this.updateStats();
     }
 
-    /**
-     * فرمت کردن متن پیام (تبدیل newline به <br> و پشتیبانی از Markdown ساده)
-     * @param {string} text - متن خام
-     * @returns {string} - HTML فرمت شده
-     */
     formatMessageText(text) {
-        // جایگزینی newline با <br>
         let formatted = text.replace(/\n/g, '<br>');
-
-        // تبدیل **bold** به <strong>
         formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-
-        // تبدیل *italic* به <em>
         formatted = formatted.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-        // تبدیل `code` به <code>
         formatted = formatted.replace(/`(.+?)`/g, '<code>$1</code>');
-
         return formatted;
     }
 
-    /**
-     * نمایش/مخفی کردن نشانگر تایپ
-     * @param {boolean} show - نمایش یا مخفی
-     */
     setTyping(show) {
         this.state.isTyping = show;
         const { typingIndicator } = this.elements;
@@ -327,11 +275,6 @@ class HapoChat {
        🌐 ارتباط با API
        ========================================== */
 
-    /**
-     * ارسال درخواست به Cloudflare Worker با قابلیت تلاش مجدد
-     * @param {string} userMessage - پیام کاربر
-     * @returns {Promise<Object>} - پاسخ API
-     */
     async fetchWithRetry(userMessage) {
         let lastError;
 
@@ -340,7 +283,7 @@ class HapoChat {
                 return await this.fetchAPI(userMessage);
             } catch (error) {
                 lastError = error;
-                console.warn(`تلاش ${attempt} ناموفق بود. ${attempt < this.config.retryAttempts ? 'تلاش مجدد...' : ''}`);
+                console.warn(`تلاش ${attempt} ناموفق بود.`);
 
                 if (attempt < this.config.retryAttempts) {
                     await this.delay(this.config.retryDelay * attempt);
@@ -351,16 +294,10 @@ class HapoChat {
         throw lastError;
     }
 
-    /**
-     * ارسال درخواست اصلی به API
-     * @param {string} userMessage - پیام کاربر
-     * @returns {Promise<Object>} - پاسخ API
-     */
     async fetchAPI(userMessage) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.config.apiTimeout);
 
-        // ساخت تاریخچه مکالمه برای ارسال به API
         const conversationHistory = this.buildConversationHistory();
 
         try {
@@ -398,23 +335,13 @@ class HapoChat {
         }
     }
 
-    /**
-     * ساخت تاریخچه مکالمه برای ارسال به API
-     * @returns {Array} - آرایه پیام‌ها
-     */
     buildConversationHistory() {
-        // ارسال ۱۰ پیام آخر برای حفظ زمینه مکالمه
         return this.state.messages.slice(-10).map(msg => ({
             role: msg.sender === 'user' ? 'user' : 'assistant',
-            content: msg.text.replace(/<br>/g, '\n').replace(/<[^>]+>/g, ''), // حذف HTML tags
+            content: msg.text.replace(/<br>/g, '\n').replace(/<[^>]+>/g, ''),
         }));
     }
 
-    /**
-     * دریافت پیام خطای دوستانه
-     * @param {Error} error - آبجکت خطا
-     * @returns {string} - پیام خطای فارسی
-     */
     getErrorMessage(error) {
         const message = error.message || '';
 
@@ -425,7 +352,7 @@ class HapoChat {
             return 'به نظر میاد اینترنتت قطع شده! 📡\n\nلطفاً اتصال رو چک کن و دوباره امتحان کن. من اینجام! 🐶';
         }
         if (message.includes('404') || message.includes('Worker')) {
-            return 'اوه! آدرس Worker درست نیست! 🔧\n\nلطفاً در تنظیمات آدرس درست رو وارد کن. راهنما رو توی README بخون! 📖';
+            return 'اوه! آدرس Worker درست نیست! 🔧\n\nلطفاً در تنظیمات آدرس درست رو وارد کن.';
         }
         if (message.includes('429') || message.includes('rate limit')) {
             return 'وای! خیلی سریع داری پیام میدی! 🚀\n\nیکم آروم‌تر... منم نیاز به استراحت دارم! 😴';
@@ -438,12 +365,9 @@ class HapoChat {
     }
 
     /* ==========================================
-       🎨 UI و تعاملات
+       🎨 UI
        ========================================== */
 
-    /**
-     * نمایش کارت خوش‌آمدگویی
-     */
     showWelcome() {
         const { chatMessages } = this.elements;
 
@@ -469,10 +393,6 @@ class HapoChat {
         this.scrollToBottom();
     }
 
-    /**
-     * ارسال پیام سریع از طریق chip
-     * @param {string} text - متن پیام
-     */
     sendQuickMessage(text) {
         this.elements.messageInput.value = text;
         this.autoResizeInput();
@@ -480,18 +400,12 @@ class HapoChat {
         this.sendMessage();
     }
 
-    /**
-     * تغییر سایز خودکار textarea
-     */
     autoResizeInput() {
         const { messageInput } = this.elements;
         messageInput.style.height = 'auto';
         messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
     }
 
-    /**
-     * به‌روزرسانی شمارنده کاراکتر
-     */
     updateCharCount() {
         const { messageInput, charCount } = this.elements;
         const count = messageInput.value.length;
@@ -504,9 +418,6 @@ class HapoChat {
         }
     }
 
-    /**
-     * اسکرول نرم به پایین چت
-     */
     scrollToBottom() {
         const { chatMessages } = this.elements;
         requestAnimationFrame(() => {
@@ -517,9 +428,6 @@ class HapoChat {
         });
     }
 
-    /**
-     * به‌روزرسانی آمار (تعداد پیام‌ها)
-     */
     updateStats() {
         const { messageCount } = this.elements;
         const count = this.state.messages.filter(m => m.sender === 'user').length;
@@ -527,30 +435,21 @@ class HapoChat {
     }
 
     /* ==========================================
-       🌙 مدیریت تم
+       🌙 تم
        ========================================== */
 
-    /**
-     * تغییر تم بین روز و شب
-     */
     toggleTheme() {
         const newTheme = this.state.theme === 'light' ? 'dark' : 'light';
         this.setTheme(newTheme);
     }
 
-    /**
-     * اعمال تم مشخص
-     * @param {string} theme - 'light' یا 'dark'
-     */
     setTheme(theme) {
         this.state.theme = theme;
         document.body.classList.toggle('dark-mode', theme === 'dark');
 
-        // به‌روزرسانی آیکون دکمه
         const icon = this.elements.themeToggle.querySelector('i');
         icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
 
-        // به‌روزرسانی toggle در تنظیمات
         if (this.elements.darkModeToggle) {
             this.elements.darkModeToggle.checked = theme === 'dark';
         }
@@ -558,11 +457,7 @@ class HapoChat {
         this.saveSettings();
     }
 
-    /**
-     * اعمال تم ذخیره شده
-     */
     applyTheme() {
-        // بررسی تم سیستم در اولین بازدید
         if (this.state.isFirstVisit) {
             const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
             const hour = new Date().getHours();
@@ -577,12 +472,9 @@ class HapoChat {
     }
 
     /* ==========================================
-       📦 مدیریت localStorage
+       📦 localStorage
        ========================================== */
 
-    /**
-     * ذخیره تاریخچه چت
-     */
     saveHistory() {
         try {
             const data = {
@@ -595,9 +487,6 @@ class HapoChat {
         }
     }
 
-    /**
-     * بارگذاری تاریخچه چت
-     */
     loadHistory() {
         try {
             const data = localStorage.getItem('hapo_chat_history');
@@ -615,9 +504,6 @@ class HapoChat {
         }
     }
 
-    /**
-     * ذخیره تنظیمات
-     */
     saveSettings() {
         try {
             const settings = {
@@ -632,9 +518,6 @@ class HapoChat {
         }
     }
 
-    /**
-     * بارگذاری تنظیمات
-     */
     loadSettings() {
         try {
             const data = localStorage.getItem('hapo_settings');
@@ -646,7 +529,6 @@ class HapoChat {
                 if (settings.isFirstVisit !== undefined) this.state.isFirstVisit = settings.isFirstVisit;
             }
 
-            // اعمال تنظیمات در UI
             if (this.elements.soundToggle) {
                 this.elements.soundToggle.checked = this.state.soundEnabled;
             }
@@ -658,9 +540,6 @@ class HapoChat {
         }
     }
 
-    /**
-     * پاک کردن تاریخچه
-     */
     clearHistory() {
         this.state.messages = [];
         localStorage.removeItem('hapo_chat_history');
@@ -670,9 +549,6 @@ class HapoChat {
         this.showToast('تاریخچه پاک شد! 🧹', 'success');
     }
 
-    /**
-     * پاک کردن چت فعلی (بدون حذف از localStorage)
-     */
     clearChat() {
         if (this.state.messages.length === 0) return;
 
@@ -687,37 +563,14 @@ class HapoChat {
     }
 
     /* ==========================================
-       📡 وضعیت اتصال
+       📡 اتصال
        ========================================== */
 
-    /**
-     * بررسی وضعیت اتصال اینترنت
-     */
     async checkConnection() {
         const isOnline = navigator.onLine;
         this.updateConnectionStatus(isOnline);
-
-        if (isOnline && this.config.workerUrl) {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-                await fetch(this.config.workerUrl, {
-                    method: 'HEAD',
-                    signal: controller.signal,
-                }).catch(() => {});
-
-                clearTimeout(timeoutId);
-            } catch {
-                // Worker ممکن است HEAD رو پشتیبانی نکند، مشکلی نیست
-            }
-        }
     }
 
-    /**
-     * به‌روزرسانی نمایش وضعیت اتصال
-     * @param {boolean} isOnline - وضعیت آنلاین
-     */
     updateConnectionStatus(isOnline) {
         this.state.isOnline = isOnline;
         const { connectionStatus } = this.elements;
@@ -733,10 +586,6 @@ class HapoChat {
         }
     }
 
-    /**
-     * به‌روزرسانی زمان آخرین بازدید
-     * @param {string} timestamp - ISO timestamp
-     */
     updateLastVisit(timestamp) {
         const { lastVisit } = this.elements;
         const date = new Date(timestamp);
@@ -748,15 +597,15 @@ class HapoChat {
 
         let text;
         if (minutes < 1) text = 'همین الان';
-        else if (minutes < 60) text = `${this.toPersianNumber(minutes)} دقیقه پیش`;
-        else if (hours < 24) text = `${this.toPersianNumber(hours)} ساعت پیش`;
-        else text = `${this.toPersianNumber(days)} روز پیش`;
+        else if (minutes < 60) text = this.toPersianNumber(minutes) + ' دقیقه پیش';
+        else if (hours < 24) text = this.toPersianNumber(hours) + ' ساعت پیش';
+        else text = this.toPersianNumber(days) + ' روز پیش';
 
-        lastVisit.textContent = `آخرین بازدید: ${text}`;
+        lastVisit.textContent = 'آخرین بازدید: ' + text;
     }
 
     /* ==========================================
-       🛠️ تنظیمات و مدال
+       🛠️ تنظیمات
        ========================================== */
 
     openSettings() {
@@ -765,6 +614,11 @@ class HapoChat {
     }
 
     closeSettings() {
+        // FIX: Save any pending URL change before closing
+        if (this.elements.workerUrlInput) {
+            this.config.workerUrl = this.elements.workerUrlInput.value.trim();
+            this.saveSettings();
+        }
         this.elements.settingsModal.classList.add('hidden');
         document.body.style.overflow = '';
     }
@@ -773,9 +627,6 @@ class HapoChat {
        📥 ذخیره و صدا
        ========================================== */
 
-    /**
-     * ذخیره چت به صورت فایل TXT
-     */
     exportChat() {
         if (this.state.messages.length === 0) {
             this.showToast('هنوز پیامی برای ذخیره نیست! 📝', 'warning');
@@ -789,17 +640,17 @@ class HapoChat {
             const sender = msg.sender === 'bot' ? 'هاپو' : 'کاربر';
             const time = this.formatTime(msg.timestamp);
             const text = msg.text.replace(/<br>/g, '\n').replace(/<[^>]+>/g, '');
-            content += `[${time}] ${sender}:\n${text}\n\n`;
+            content += '[' + time + '] ' + sender + ':\n' + text + '\n\n';
         });
 
         content += '============================\n';
-        content += `ذخیره شده در: ${new Date().toLocaleString('fa-IR')}`;
+        content += 'ذخیره شده در: ' + new Date().toLocaleString('fa-IR');
 
         const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `hapo-chat-${new Date().toISOString().slice(0, 10)}.txt`;
+        a.download = 'hapo-chat-' + new Date().toISOString().slice(0, 10) + '.txt';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -808,9 +659,6 @@ class HapoChat {
         this.showToast('چت ذخیره شد! 💾', 'success');
     }
 
-    /**
-     * پخش صدای اعلان
-     */
     playNotificationSound() {
         try {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -828,18 +676,13 @@ class HapoChat {
 
             oscillator.start(audioCtx.currentTime);
             oscillator.stop(audioCtx.currentTime + 0.1);
-        } catch (e) {
-            // صدا اختیاری است
-        }
+        } catch (e) {}
     }
 
     /* ==========================================
-       🎤 ضبط صدا (Web Speech API)
+       🎤 صدا
        ========================================== */
 
-    /**
-     * تغییر وضعیت ضبط صدا
-     */
     toggleVoiceInput() {
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
             this.showToast('مرورگر شما از ضبط صدا پشتیبانی نمی‌کند 🎤', 'warning');
@@ -885,24 +728,17 @@ class HapoChat {
         this.recognition.start();
     }
 
-    /**
-     * مدیریت پیوست فایل
-     */
     handleAttach() {
         this.showToast('این قابلیت به زودی اضافه می‌شه! 📎', 'warning');
     }
 
     /* ==========================================
-       🔔 Toast Notifications
+       🔔 Toast
        ========================================== */
 
-    /**
-     * نمایش پیام Toast
-     * @param {string} message - متن پیام
-     * @param {string} type - 'success' | 'error' | 'warning'
-     * @param {number} duration - مدت زمان نمایش (میلی‌ثانیه)
-     */
-    showToast(message, type = 'success', duration = 3000) {
+    showToast(message, type, duration) {
+        type = type || 'success';
+        duration = duration || 3000;
         const { toastContainer } = this.elements;
 
         const icons = {
@@ -912,11 +748,8 @@ class HapoChat {
         };
 
         const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.innerHTML = `
-            <i class="fas ${icons[type]}"></i>
-            <span>${message}</span>
-        `;
+        toast.className = 'toast ' + type;
+        toast.innerHTML = '<i class="fas ' + icons[type] + '"></i><span>' + message + '</span>';
 
         toastContainer.appendChild(toast);
 
@@ -927,24 +760,14 @@ class HapoChat {
     }
 
     /* ==========================================
-       🛡️ ابزارهای کمکی
+       🛡️ Helpers
        ========================================== */
 
-    /**
-     * تبدیل اعداد انگلیسی به فارسی
-     * @param {number|string} num - عدد یا رشته
-     * @returns {string} - رشته فارسی
-     */
     toPersianNumber(num) {
         const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
-        return String(num).replace(/\d/g, digit => persianDigits[digit]);
+        return String(num).replace(/\d/g, digit => persianDigits[parseInt(digit)]);
     }
 
-    /**
-     * فرمت کردن زمان
-     * @param {string} timestamp - ISO timestamp
-     * @returns {string} - زمان فرمت شده
-     */
     formatTime(timestamp) {
         const date = new Date(timestamp);
         return date.toLocaleTimeString('fa-IR', {
@@ -953,35 +776,23 @@ class HapoChat {
         });
     }
 
-    /**
-     * جلوگیری از XSS با escape کردن HTML
-     * @param {string} text - متن خام
-     * @returns {string} - متن امن
-     */
     escapeHTML(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
 
-    /**
-     * تاخیر (Promise-based)
-     * @param {number} ms - میلی‌ثانیه
-     * @returns {Promise}
-     */
     delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 }
 
 /* ============================================
-   🚀 راه‌اندازی برنامه
+   🚀 Initialize
    ============================================ */
 
-// ایجاد نمونه جهانی برای دسترسی از HTML
 const hapo = new HapoChat();
 
-// راه‌اندازی بعد از بارگذاری کامل DOM
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🐾 Hapo Chatbot initialized!');
 });
