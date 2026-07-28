@@ -29,6 +29,10 @@ class HapoChat {
     init() {
         this.cacheElements();
         this.loadSettings();
+        // Ensure hardcoded Worker URL is never overridden by empty localStorage
+        if (!this.config.workerUrl) {
+            this.config.workerUrl = 'https://hapo-api-proxy.arsaepaengin.workers.dev';
+        }
         this.loadHistory();
         this.bindEvents();
         this.checkConnection();
@@ -147,27 +151,7 @@ class HapoChat {
             return;
         }
 
-        // FIX: If no worker URL, show prompt immediately and continue
-        if (!this.config.workerUrl) {
-            const url = prompt(
-                '🔧 آدرس Cloudflare Worker تنظیم نشده!\n\n' +
-                'لطفاً آدرس Worker خود را وارد کنید:\n' +
-                '(مثال: https://hapo-api-proxy.arsaepaengin.workers.dev)\n\n' +
-                'این آدرس را می‌توانید از داشبورد Cloudflare > Workers > Your Worker بگیرید.'
-            );
-            if (url && url.trim()) {
-                this.config.workerUrl = url.trim();
-                this.saveSettings();
-                if (this.elements.workerUrlInput) {
-                    this.elements.workerUrlInput.value = url.trim();
-                }
-                this.showToast('آدرس Worker ذخیره شد! در حال ارسال... 🎉', 'success');
-                // Continue below to send the message
-            } else {
-                this.showToast('بدون آدرس Worker نمی‌تونم پیامتو بفرستم 🐶', 'warning');
-                return;
-            }
-        }
+        // Worker URL is hardcoded - no prompt needed
 
         // Add user message
         this.addMessage('user', text);
@@ -525,7 +509,9 @@ class HapoChat {
                 const settings = JSON.parse(data);
                 if (settings.theme) this.state.theme = settings.theme;
                 if (settings.soundEnabled !== undefined) this.state.soundEnabled = settings.soundEnabled;
-                if (settings.workerUrl) this.config.workerUrl = settings.workerUrl;
+                if (settings.workerUrl && settings.workerUrl.trim().length > 0) {
+                    this.config.workerUrl = settings.workerUrl.trim();
+                }
                 if (settings.isFirstVisit !== undefined) this.state.isFirstVisit = settings.isFirstVisit;
             }
 
