@@ -1,5 +1,5 @@
 /* ============================================
-   🐾 Hapo Pug Chatbot - Complete JavaScript
+   🐾 Hapo Pug Chatbot - Complete JavaScript (Fixed)
    ============================================ */
 
 class HapoChat {
@@ -111,7 +111,6 @@ class HapoChat {
             this.saveSettings();
         });
 
-        // FIX: Save worker URL immediately on every keystroke
         this.elements.workerUrlInput.addEventListener('input', (e) => {
             this.config.workerUrl = e.target.value.trim();
             this.saveSettings();
@@ -151,8 +150,6 @@ class HapoChat {
             return;
         }
 
-        // Worker URL is hardcoded - no prompt needed
-
         // Add user message
         this.addMessage('user', text);
         messageInput.value = '';
@@ -165,8 +162,12 @@ class HapoChat {
         try {
             const response = await this.fetchWithRetry(text);
 
+            // FIX: Handle case where API returns content even with error
             if (response && response.content) {
                 this.addMessage('bot', response.content);
+            } else if (response && response.error) {
+                // If API returned an error object without content
+                this.addMessage('bot', this.getErrorMessage(new Error(response.error)));
             } else {
                 throw new Error('پاسخ نامعتبر از سرور');
             }
@@ -299,12 +300,18 @@ class HapoChat {
 
             clearTimeout(timeoutId);
 
+            const data = await response.json().catch(() => ({}));
+
+            // FIX: Handle non-OK responses gracefully
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `خطای سرور: ${response.status}`);
+                throw new Error(data.error || `خطای سرور: ${response.status}`);
             }
 
-            const data = await response.json();
+            // FIX: If response contains error but also content, still return it
+            if (data.error && !data.content) {
+                throw new Error(data.error);
+            }
+
             return data;
         } catch (error) {
             clearTimeout(timeoutId);
@@ -327,7 +334,7 @@ class HapoChat {
     }
 
     getErrorMessage(error) {
-        const message = error.message || '';
+        const message = (error.message || '').toLowerCase();
 
         if (message.includes('timeout') || message.includes('زمان')) {
             return 'وای! سرور کمی خسته شده 🥱\n\nلطفاً چند ثانیه صبر کن و دوباره بپرس. من حتماً جواب میدم! 🐾';
@@ -335,17 +342,24 @@ class HapoChat {
         if (message.includes('network') || message.includes('اتصال') || message.includes('اینترنت')) {
             return 'به نظر میاد اینترنتت قطع شده! 📡\n\nلطفاً اتصال رو چک کن و دوباره امتحان کن. من اینجام! 🐶';
         }
-        if (message.includes('404') || message.includes('Worker')) {
-            return 'اوه! آدرس Worker درست نیست! 🔧\n\nلطفاً در تنظیمات آدرس درست رو وارد کن.';
+        if (message.includes('404') || message.includes('worker') || message.includes('not found')) {
+            return 'اوه! آدرس Worker درست نیست! 🔧\n\nلطفاً در تنظیمات آدرس درست رو وارد کن. آدرس باید مثل این باشه:\nhttps://your-worker.your-subdomain.workers.dev';
         }
         if (message.includes('429') || message.includes('rate limit')) {
             return 'وای! خیلی سریع داری پیام میدی! 🚀\n\nیکم آروم‌تر... منم نیاز به استراحت دارم! 😴';
         }
-        if (message.includes('401') || message.includes('403') || message.includes('Unauthorized')) {
+        if (message.includes('401') || message.includes('403') || message.includes('unauthorized')) {
             return 'مشکلی در کلید API هست! 🔑\n\nلطفاً تنظیمات Worker رو چک کن و مطمئن شو کلید API درسته.';
         }
+        // FIX: Handle insufficient balance / quota errors
+        if (message.includes('insufficient') || message.includes('balance') || message.includes('quota') || message.includes('credit') || message.includes('اعتبار')) {
+            return 'اوف! اعتبار API تموم شده! 💸\n\nاین مشکل وقتی پیش میاد که:\n1️⃣ اعتبار OpenAI تموم شده\n2️⃣ API key منقضی شده\n3️⃣ حساب نیاز به شارژ داره\n\nراه‌حل:\n🔹 برو به dashboard.openai.com\n🔹 اعتبارت رو چک کن\n🔹 یه API key جدید بساز\n🔹 یا توی Worker، USE_MOCK=true رو فعال کن برای تست\n\nاگه راهنمایی خواستی بگو! 🐾';
+        }
+        if (message.includes('api key') || message.includes('key')) {
+            return 'مشکلی در کلید API هست! 🔑\n\nلطفاً مطمئن شو OPENAI_API_KEY توی Cloudflare Worker درست تنظیم شده.';
+        }
 
-        return 'اوف! یه مشکلی پیش اومد! 😅\n\n' + message + '\n\nمی‌خوای دوباره امتحان کنی؟ من آماده‌ام! 💪';
+        return 'اوف! یه مشکلی پیش اومد! 😅\n\n' + error.message + '\n\nمی‌خوای دوباره امتحان کنی؟ من آماده‌ام! 💪';
     }
 
     /* ==========================================
@@ -600,7 +614,6 @@ class HapoChat {
     }
 
     closeSettings() {
-        // FIX: Save any pending URL change before closing
         if (this.elements.workerUrlInput) {
             this.config.workerUrl = this.elements.workerUrlInput.value.trim();
             this.saveSettings();
