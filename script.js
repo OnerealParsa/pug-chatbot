@@ -1,5 +1,6 @@
 /* ============================================
-   🐾 Hapo Pug Chatbot - Complete JavaScript (Fixed)
+   🐾 Hapo Pug Chatbot - Complete JavaScript
+   Free API: Pollinations (no key required)
    ============================================ */
 
 class HapoChat {
@@ -7,11 +8,25 @@ class HapoChat {
         this.config = {
             maxHistory: 100,
             maxChars: 2000,
-            workerUrl: 'https://hapo-api-proxy.arsaepaengin.workers.dev',
-            apiTimeout: 30000,
+            // Free, key-less, OpenAI-compatible endpoint (default)
+            apiUrl: 'https://text.pollinations.ai/openai',
+            model: 'openai',
+            // Plain-text GET endpoint used as automatic fallback
+            fallbackUrl: 'https://text.pollinations.ai/',
+            // Optional custom OpenAI-compatible endpoint set by the user
+            customApiUrl: null,
+            apiTimeout: 45000,
             retryAttempts: 2,
-            retryDelay: 2000,
+            retryDelay: 2500,
         };
+
+        this.systemPrompt =
+            'تو «هاپو» هستی؛ یک پاگ دوست‌داشتنی و چت‌بات فارسی‌زبان. ' +
+            'شخصیت تو گرم، شوخ‌طبع اما دقیق و علمی است. ' +
+            'همیشه به فارسی جواب بده، مگر اینکه کاربر به زبان دیگری بنویسد. ' +
+            'پاسخ‌ها کوتاه و مفید باشند؛ اگر سؤال علمی است دقیق و درست جواب بده. ' +
+            'از ایموجی‌ها به‌طور ظریف استفاده کن (مثل 🐶🐾). ' +
+            'سازنده این پروژه پارسا پولادوند است.';
 
         this.state = {
             messages: [],
@@ -29,10 +44,6 @@ class HapoChat {
     init() {
         this.cacheElements();
         this.loadSettings();
-        // Ensure hardcoded Worker URL is never overridden by empty localStorage
-        if (!this.config.workerUrl) {
-            this.config.workerUrl = 'https://hapo-api-proxy.arsaepaengin.workers.dev';
-        }
         this.loadHistory();
         this.bindEvents();
         this.checkConnection();
@@ -48,7 +59,7 @@ class HapoChat {
         }
 
         setInterval(() => this.checkConnection(), 10000);
-        console.log('🐾 هاپو آماده است!');
+        console.log('🐾 هاپو آماده است! (API رایگان)');
     }
 
     cacheElements() {
@@ -112,7 +123,8 @@ class HapoChat {
         });
 
         this.elements.workerUrlInput.addEventListener('input', (e) => {
-            this.config.workerUrl = e.target.value.trim();
+            const value = e.target.value.trim();
+            this.config.customApiUrl = (value && value.startsWith('https://')) ? value : null;
             this.saveSettings();
         });
 
@@ -162,12 +174,8 @@ class HapoChat {
         try {
             const response = await this.fetchWithRetry(text);
 
-            // FIX: Handle case where API returns content even with error
             if (response && response.content) {
                 this.addMessage('bot', response.content);
-            } else if (response && response.error) {
-                // If API returned an error object without content
-                this.addMessage('bot', this.getErrorMessage(new Error(response.error)));
             } else {
                 throw new Error('پاسخ نامعتبر از سرور');
             }
@@ -260,6 +268,10 @@ class HapoChat {
        🌐 ارتباط با API
        ========================================== */
 
+    getEndpoint() {
+        return this.config.customApiUrl || this.config.apiUrl;
+    }
+
     async fetchWithRetry(userMessage) {
         let lastError;
 
@@ -276,6 +288,14 @@ class HapoChat {
             }
         }
 
+        // Automatic fallback to the plain-text GET endpoint
+        try {
+            console.warn('تلاش با endpoint جایگزین (GET)...');
+            return await this.fetchFallback(userMessage);
+        } catch (error) {
+            lastError = error;
+        }
+
         throw lastError;
     }
 
@@ -283,17 +303,21 @@ class HapoChat {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.config.apiTimeout);
 
-        const conversationHistory = this.buildConversationHistory();
+        // History already ends with the current user message
+        const messages = [
+            { role: 'system', content: this.systemPrompt },
+            ...this.buildConversationHistory(),
+        ];
 
         try {
-            const response = await fetch(this.config.workerUrl, {
+            const response = await fetch(this.getEndpoint(), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    message: userMessage,
-                    history: conversationHistory,
+                    model: this.config.model,
+                    messages,
                 }),
                 signal: controller.signal,
             });
@@ -302,17 +326,25 @@ class HapoChat {
 
             const data = await response.json().catch(() => ({}));
 
-            // FIX: Handle non-OK responses gracefully
             if (!response.ok) {
-                throw new Error(data.error || `خطای سرور: ${response.status}`);
+                const apiError =
+                    (data && data.error && data.error.message) ||
+                    (typeof (data && data.error) === 'string' ? data.error : '') ||
+                    `خطای سرور: ${response.status}`;
+                throw new Error(apiError);
             }
 
-            // FIX: If response contains error but also content, still return it
-            if (data.error && !data.content) {
-                throw new Error(data.error);
+            const content = data
+                && data.choices
+                && data.choices[0]
+                && data.choices[0].message
+                && data.choices[0].message.content;
+
+            if (content && content.trim()) {
+                return { content: content.trim() };
             }
 
-            return data;
+            throw new Error('پاسخ خالی از سرور');
         } catch (error) {
             clearTimeout(timeoutId);
 
@@ -321,6 +353,48 @@ class HapoChat {
             }
             if (error.name === 'TypeError' && !navigator.onLine) {
                 throw new Error('اتصال اینترنت برقرار نیست.');
+            }
+            throw error;
+        }
+    }
+
+    async fetchFallback(userMessage) {
+        const recent = this.buildConversationHistory().slice(-4);
+        const transcript = recent
+            .map(m => (m.role === 'user' ? 'کاربر' : 'هاپو') + ': ' + m.content)
+            .join('\n');
+
+        const prompt =
+            this.systemPrompt + '\n\n' +
+            (transcript ? transcript + '\n' : '') +
+            'هاپو:';
+
+        const url = this.config.fallbackUrl
+            + encodeURIComponent(prompt)
+            + '?model=' + encodeURIComponent(this.config.model);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.config.apiTimeout);
+
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new Error(`خطای سرور: ${response.status}`);
+            }
+
+            const text = await response.text();
+            if (!text || !text.trim() || text.trim().startsWith('{"error"')) {
+                throw new Error('پاسخ نامعتبر از سرور');
+            }
+
+            return { content: text.trim() };
+        } catch (error) {
+            clearTimeout(timeoutId);
+
+            if (error.name === 'AbortError') {
+                throw new Error('زمان انتظار به پایان رسید. لطفاً دوباره امتحان کنید.');
             }
             throw error;
         }
@@ -342,21 +416,14 @@ class HapoChat {
         if (message.includes('network') || message.includes('اتصال') || message.includes('اینترنت')) {
             return 'به نظر میاد اینترنتت قطع شده! 📡\n\nلطفاً اتصال رو چک کن و دوباره امتحان کن. من اینجام! 🐶';
         }
-        if (message.includes('404') || message.includes('worker') || message.includes('not found')) {
-            return 'اوه! آدرس Worker درست نیست! 🔧\n\nلطفاً در تنظیمات آدرس درست رو وارد کن. آدرس باید مثل این باشه:\nhttps://your-worker.your-subdomain.workers.dev';
-        }
         if (message.includes('429') || message.includes('rate limit')) {
-            return 'وای! خیلی سریع داری پیام میدی! 🚀\n\nیکم آروم‌تر... منم نیاز به استراحت دارم! 😴';
+            return 'وای! خیلی سریع داری پیام میدی! 🚀\n\nAPI رایگان محدودیت تعداد درخواست داره. چند ثانیه صبر کن و دوباره امتحان کن 🐾';
         }
         if (message.includes('401') || message.includes('403') || message.includes('unauthorized')) {
-            return 'مشکلی در کلید API هست! 🔑\n\nلطفاً تنظیمات Worker رو چک کن و مطمئن شو کلید API درسته.';
+            return 'دسترسی به API برقرار نشد! 🔑\n\nاگه از آدرس API سفارشی استفاده می‌کنی، تنظیماتش رو چک کن.';
         }
-        // FIX: Handle insufficient balance / quota errors
-        if (message.includes('insufficient') || message.includes('balance') || message.includes('quota') || message.includes('credit') || message.includes('اعتبار')) {
-            return 'اوف! اعتبار API تموم شده! 💸\n\nاین مشکل وقتی پیش میاد که:\n1️⃣ اعتبار OpenAI تموم شده\n2️⃣ API key منقضی شده\n3️⃣ حساب نیاز به شارژ داره\n\nراه‌حل:\n🔹 برو به dashboard.openai.com\n🔹 اعتبارت رو چک کن\n🔹 یه API key جدید بساز\n🔹 یا توی Worker، USE_MOCK=true رو فعال کن برای تست\n\nاگه راهنمایی خواستی بگو! 🐾';
-        }
-        if (message.includes('api key') || message.includes('key')) {
-            return 'مشکلی در کلید API هست! 🔑\n\nلطفاً مطمئن شو OPENAI_API_KEY توی Cloudflare Worker درست تنظیم شده.';
+        if (message.includes('404') || message.includes('not found')) {
+            return 'اوه! آدرس API درست نیست! 🔧\n\nاگه در تنظیمات آدرس سفارشی وارد کردی، درستیش رو چک کن. اگه خالی بذاری از API رایگان پیش‌فرض استفاده می‌شه! 🐾';
         }
 
         return 'اوف! یه مشکلی پیش اومد! 😅\n\n' + error.message + '\n\nمی‌خوای دوباره امتحان کنی؟ من آماده‌ام! 💪';
@@ -507,7 +574,7 @@ class HapoChat {
             const settings = {
                 theme: this.state.theme,
                 soundEnabled: this.state.soundEnabled,
-                workerUrl: this.config.workerUrl,
+                customApiUrl: this.config.customApiUrl,
                 isFirstVisit: this.state.isFirstVisit,
             };
             localStorage.setItem('hapo_settings', JSON.stringify(settings));
@@ -523,20 +590,20 @@ class HapoChat {
                 const settings = JSON.parse(data);
                 if (settings.theme) this.state.theme = settings.theme;
                 if (settings.soundEnabled !== undefined) this.state.soundEnabled = settings.soundEnabled;
-                if (settings.workerUrl && settings.workerUrl.trim().length > 0) {
-                    this.config.workerUrl = settings.workerUrl.trim();
+                if (settings.customApiUrl && settings.customApiUrl.startsWith('https://')) {
+                    this.config.customApiUrl = settings.customApiUrl;
                 }
                 if (settings.isFirstVisit !== undefined) this.state.isFirstVisit = settings.isFirstVisit;
             }
-
-            if (this.elements.soundToggle) {
-                this.elements.soundToggle.checked = this.state.soundEnabled;
-            }
-            if (this.elements.workerUrlInput) {
-                this.elements.workerUrlInput.value = this.config.workerUrl;
-            }
         } catch (e) {
             console.warn('خطا در بارگذاری تنظیمات:', e);
+        }
+
+        if (this.elements.soundToggle) {
+            this.elements.soundToggle.checked = this.state.soundEnabled;
+        }
+        if (this.elements.workerUrlInput) {
+            this.elements.workerUrlInput.value = this.config.customApiUrl || '';
         }
     }
 
@@ -580,10 +647,6 @@ class HapoChat {
 
         const text = connectionStatus.querySelector('.status-text');
         text.textContent = isOnline ? 'آنلاین' : 'آفلاین';
-
-        if (!isOnline) {
-            this.showToast('اتصال اینترنت قطع شد! 📡', 'warning');
-        }
     }
 
     updateLastVisit(timestamp) {
@@ -615,7 +678,8 @@ class HapoChat {
 
     closeSettings() {
         if (this.elements.workerUrlInput) {
-            this.config.workerUrl = this.elements.workerUrlInput.value.trim();
+            const value = this.elements.workerUrlInput.value.trim();
+            this.config.customApiUrl = (value && value.startsWith('https://')) ? value : null;
             this.saveSettings();
         }
         this.elements.settingsModal.classList.add('hidden');
